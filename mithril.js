@@ -189,12 +189,13 @@ new function(window) {
 	}
 	function redraw() {
 		now = window.performance && window.performance.now ? window.performance.now() : new window.Date().getTime()
-		if (now - lastRedraw > 16) m.redraw()
+		var timeToRedraw = now-lastRedraw-16
+		if (timeToRedraw < 0) m.redraw()
 		else {
 			var cancel = window.cancelAnimationFrame || window.clearTimeout
 			var defer = window.requestAnimationFrame || window.setTimeout
 			cancel(lastRedrawId)
-			lastRedrawId = defer(m.redraw, 0)
+			lastRedrawId = defer(m.redraw, timeToRedraw)
 		}
 	}
 	
