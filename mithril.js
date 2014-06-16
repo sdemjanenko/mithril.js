@@ -129,6 +129,13 @@ Mithril = m = new function app(window) {
 						node = cached.nodes[0]
 						if (parentTag === "textarea") parentElement.value = data
 						else if (editable) editable.innerHTML = data
+						else if (typeof node === "undefined" && typeof data === "string") {
+							node = window.document.createTextNode(data)
+							parentElement.innerHTML = ""
+							parentElement.insertBefore(node, parentElement.childNodes[index] || null)
+							cached = new data.constructor(data)
+							cached.nodes = [node]
+						}
 						else {
 							parentElement.insertBefore(node, parentElement.childNodes[index] || null)
 							node.nodeValue = data
