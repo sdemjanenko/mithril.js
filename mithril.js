@@ -54,6 +54,21 @@ Mithril = m = new function app(window, undefined) {
 		}
 		return cell
 	}
+
+	function updateFromModifiers(cached) {
+		for (var i = 0; i < cached.length; i++) {
+			var item = cached[i]
+			if (typeof item.children !== "undefined") {
+				updateFromModifiers(item.children)
+			}
+			if (typeof item.configContext !== "undefined" && typeof item.configContext.modifiers === "function") {
+				var modifiedAttrs = item.configContext.modifiers(item) || {}
+				item.attrs = setAttributes(item.nodes[0], item.tag, modifiedAttrs, item.attrs, item.attrs.xmlns)
+			}
+		}
+		return cached
+	}
+
 	function build(parentElement, parentTag, parentCache, parentIndex, data, cached, shouldReattach, index, editable, namespace, configs) {
 		//`build` is a recursive function that manages creation/diffing/removal of DOM elements based on comparison between `data` and `cached`
 		//the diff algorithm can be summarized as this:
@@ -81,7 +96,7 @@ Mithril = m = new function app(window, undefined) {
 		//- this prevents lifecycle surprises from procedural helpers that mix implicit and explicit return statements
 		//- it simplifies diffing code
 		if (data == null) data = ""
-		if (data.subtree === "retain") return cached
+		if (data.subtree === "retain") return updateFromModifiers([cached])[0]
 		var cachedType = type(cached), dataType = type(data)
 		if (cached == null || cachedType != dataType) {
 			if (cached != null) {
@@ -415,6 +430,23 @@ Mithril = m = new function app(window, undefined) {
 		cellCache[id] = build(node, null, undefined, undefined, cell, cellCache[id], false, 0, null, undefined, configs)
 		for (var i = 0; i < configs.length; i++) configs[i]()
 	}
+	// this function is meant to be called at 60fps - it handles animating state
+	// I got this idea from famous where we build a new cached state, storing modifiers
+	// Running the modifiers is fast and lets us run animations without having to change the DOM tree (other than style attrs)
+	// this is meant to be run instead of m.redraw
+	//for (var i = 0; i < roots.length; i++) {
+	//	if (controllers[i] && mode != "none") m.render(roots[i], modules[i].view(controllers[i]), mode == "all")
+	//}
+	m.renderAnimations =  function(root) {
+		var configs = []
+		if (!root) throw new Error("Please ensure the DOM element exists before rendering a template into it.")
+		var id = getCellCacheKey(root)
+		var node = root == window.document || root == window.document.documentElement ? documentNode : root
+		if (cellCache[id] !== undefined) {
+			cellCache[id] = build(node, null, undefined, undefined, {subtree: "retain"}, cellCache[id], false, 0, null, undefined, configs)
+			//for (var i = 0; i < configs.length; i++) configs[i]()
+		}
+	}
 	function getCellCacheKey(element) {
 		var index = nodeCache.indexOf(element)
 		return index < 0 ? nodeCache.push(element) - 1 : index
@@ -448,7 +480,7 @@ Mithril = m = new function app(window, undefined) {
 		return gettersetter(store)
 	}
 
-	var roots = [], modules = [], controllers = [], lastRedrawId = null, lastRedrawCallTime = 0, computePostRedrawHook = null, prevented = false
+	var roots = [], modules = [], controllers = [], lastRedrawId = null, lastRedrawCallTime = 0, computePostRedrawHook = null, prevented = false, lastAnimateRedrawId = null
 	var FRAME_BUDGET = 16 //60 frames per second = 1 call per 16 ms
 	m.module = function(root, module) {
 		var index = roots.indexOf(root)
@@ -475,6 +507,7 @@ Mithril = m = new function app(window, undefined) {
 		var defer = window.requestAnimationFrame || window.setTimeout
 		//lastRedrawId is a positive number if a second redraw is requested before the next animation frame
 		//lastRedrawID is null if it's the first redraw and not an event handler
+		cancel(lastAnimateRedrawId)
 		if (lastRedrawId && force !== true) {
 			//when setTimeout: only reschedule redraw if time between now and previous redraw is bigger than a frame, otherwise keep currently scheduled timeout
 			//when rAF: always reschedule redraw
@@ -502,6 +535,17 @@ Mithril = m = new function app(window, undefined) {
 		lastRedrawId = null
 		lastRedrawCallTime = new Date
 		m.redraw.strategy("diff")
+
+		var defer = window.requestAnimationFrame || window.setTimeout
+		lastAnimateRedrawId = defer(animationRedraw, FRAME_BUDGET)
+	}
+
+	function animationRedraw() {
+		for (var i = 0; i < roots.length; i++) {
+			m.renderAnimations(roots[i])
+		}
+		var defer = window.requestAnimationFrame || window.setTimeout
+		lastAnimateRedrawId = defer(animationRedraw, FRAME_BUDGET) // 60 fps
 	}
 
 	var pendingRequests = 0
